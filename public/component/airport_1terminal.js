@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import ModelLabel from './modelLabel.js';
+import HoverOutline from '../effect/hoverOutline.js';
 
 // 토끼(korean_rabbit.gltf) 모델을 지도 위 고정된 위치에 배치하는
 // MapLibre 커스텀 레이어 클래스.
@@ -66,6 +67,7 @@ export default class RabbitModel {
             (gltf) => {
                 gltf.scene.scale.set(this.meshScale[0], this.meshScale[1], this.meshScale[2]);
                 this.scene.add(gltf.scene);
+                this.modelRoot = gltf.scene;
             },
             undefined,
             (error) => {
@@ -82,6 +84,7 @@ export default class RabbitModel {
         this.renderer.autoClear = false;
 
         this.label = new ModelLabel(map, this.constructor.name);
+        this.hoverOutline = new HoverOutline(map, this.renderer, this.scene, this.camera);
     }
 
     render(gl, args) {
@@ -111,6 +114,14 @@ export default class RabbitModel {
         this.camera.projectionMatrix = m.multiply(l);
         this.renderer.resetState();
         this.renderer.render(this.scene, this.camera);
+
+        if (this.modelRoot) {
+            this.hoverOutline.setTargets([this.modelRoot]);
+            const hit = this.hoverOutline.pickHover();
+            this.hoverOutline.setSelected(hit ? this.modelRoot : null);
+            this.hoverOutline.render();
+        }
+
         this.map.triggerRepaint();
     }
 }

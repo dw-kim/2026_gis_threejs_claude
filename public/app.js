@@ -2,7 +2,6 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import KoreanAirModel from './component/airplain.js';
 import RabbitModel from './component/airport_1terminal.js';
-import AirportModel from './component/airport_sample.js';
 
 const socket = io();
 
@@ -50,11 +49,9 @@ const map = new maplibregl.Map({
 map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }));
 map.addControl(new maplibregl.TerrainControl({ source: 'terrainSource' }));
 
-// three.js로 3D 모델(공항)을 지도 위에 올리기 위한 커스텀 레이어
-const airportModelLayer = new AirportModel(map, {
-    origin: [126.4280, 37.4600], // 모델을 배치할 위경도
-    elevationOffset: -530 // 값을 더 낮추면(음수를 키우면) 모델이 지면 아래로 더 내려감
-});
+// 드래그 이동 및 대한항공 함대의 기준 위치로 쓰이는 좌표(공항 모델은 제거됨)
+const modelOrigin = [126.4280, 37.4600];
+let modelElevationOffset = -530;
 
 // 토끼 모델 배치 (별도 위경도/회전)
 const rabbitModelLayer = new RabbitModel(map, {
@@ -65,14 +62,13 @@ const rabbitModelLayer = new RabbitModel(map, {
 
 // 대한항공 모델 20대를 InstancedMesh 하나로 그려 기준 위치 근처에서 랜덤 비행
 const koreanAirModelLayer = new KoreanAirModel(map, {
-    count: 600,
+    count: 1000,
     labelPrefix: 'KoreanAirModel',
-    origin: airportModelLayer.origin,
-    getElevationOffsetBase: () => airportModelLayer.elevationOffset
+    origin: modelOrigin,
+    getElevationOffsetBase: () => modelElevationOffset
 });
 
 map.on('load', () => {
-    // map.addLayer(airportModelLayer);
     map.addLayer(rabbitModelLayer);
     map.addLayer(koreanAirModelLayer);
 });
@@ -83,7 +79,7 @@ let isVerticalDrag = false;
 let dragLastPoint = null;
 
 map.on('mousedown', (e) => {
-    const originPoint = map.project(airportModelLayer.origin);
+    const originPoint = map.project(modelOrigin);
     const dx = e.point.x - originPoint.x;
     const dy = e.point.y - originPoint.y;
 
@@ -103,11 +99,11 @@ map.on('mousemove', (e) => {
 
     if (isVerticalDrag) {
         const deltaY = dragLastPoint.y - e.point.y; // 위로 드래그하면 고도 증가
-        airportModelLayer.elevationOffset += deltaY * 2; // 픽셀당 약 2m, 필요시 배율 조정
+        modelElevationOffset += deltaY * 2; // 픽셀당 약 2m, 필요시 배율 조정
     } else {
         const newLngLat = map.unproject(e.point);
-        airportModelLayer.origin[0] = newLngLat.lng;
-        airportModelLayer.origin[1] = newLngLat.lat;
+        modelOrigin[0] = newLngLat.lng;
+        modelOrigin[1] = newLngLat.lat;
     }
 
     dragLastPoint = e.point;
@@ -120,7 +116,7 @@ function endModelDrag() {
     map.dragPan.enable();
     map.dragRotate.enable();
     map.getCanvas().style.cursor = '';
-    console.log('modelOrigin:', airportModelLayer.origin, 'modelElevationOffset:', airportModelLayer.elevationOffset);
+    console.log('modelOrigin:', modelOrigin, 'modelElevationOffset:', modelElevationOffset);
 }
 
 map.on('mouseup', endModelDrag);

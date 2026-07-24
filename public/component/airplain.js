@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import ModelLabel from './modelLabel.js';
+import HoverOutline from '../effect/hoverOutline.js';
 
 // 대한항공(korean_air.gltf) 모델 여러 대를 THREE.InstancedMesh 하나로 그리는
 // MapLibre 커스텀 레이어 클래스. 비행기가 많아져도 씬/렌더러/드로우콜은 하나뿐이라
@@ -14,9 +15,9 @@ export default class KoreanAirModel {
         count = 1, // 비행기 대수
         labelPrefix = 'KoreanAirModel',
         getElevationOffsetBase = () => 0,
-        altitude = 550, // 비행 고도(m). 값을 키우면 더 높이 뜸
+        altitude = 600, // 비행 고도(m). 값을 키우면 더 높이 뜸
         turnRate = Math.PI, // 회전 속도(rad/sec). 값을 키우면 더 빨리 방향을 튼다
-        speed = 120, // 이동 속도(m/s). 값을 키우면 더 빨리 따라옴
+        speed = 200, // 이동 속도(m/s). 값을 키우면 더 빨리 따라옴
         modelScale = 0.01,
         randomMoveIntervalMs = 5000, // 새 목표 지점을 뽑는 주기
         randomMoveRadius = 3000 // 기준 위치로부터 목표 지점을 뽑는 반경(m)
@@ -131,6 +132,7 @@ export default class KoreanAirModel {
         this.renderer.autoClear = false;
 
         this.labels = Array.from({ length: this.count }, (_, i) => new ModelLabel(map, `${this.labelPrefix}-${i}`));
+        this.hoverOutline = new HoverOutline(map, this.renderer, this.scene, this.camera);
     }
 
     // 로드된 gltf의 모든 메시를 하나의 지오메트리로 합쳐 InstancedMesh를 만든다.
@@ -162,6 +164,13 @@ export default class KoreanAirModel {
             return;
         }
 
+        // mergeGeometries가 계산하는 바운딩 스피어는 mercator 변환 전(로컬) 좌표
+        // 기준이라 실제 렌더링 위치와 무관하다. InstancedMesh.raycast()는 이
+        // 바운딩 스피어로 먼저 "레이가 근처를 지나가는지" 걸러내는데, 그 결과
+        // 실제 비행기 위치와 전혀 다른 곳을 기준으로 걸러져 항상 놓치게 된다.
+        // 무한대로 만들어 이 사전 필터 자체를 무력화한다.
+        mergedGeometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), Infinity);
+
         const material = materials.length > 1 ? materials : materials[0];
         this.instancedMesh = new THREE.InstancedMesh(mergedGeometry, material, this.count);
         this.instancedMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -170,6 +179,18 @@ export default class KoreanAirModel {
         // 실제 렌더링 위치와 맞지 않아 줌 레벨에 따라 잘못 컬링된다. 컬링을 끈다.
         this.instancedMesh.frustumCulled = false;
         this.scene.add(this.instancedMesh);
+
+        // OutlinePass는 InstancedMesh의 특정 인스턴스 하나만 골라 외곽선을 그릴 수
+        // 없으므로, 호버된 비행기 하나의 변환을 복사해 보여주는 "고스트" 메시를
+        // 따로 둔다. OutlinePass는 visible=false인 오브젝트를 마스크에 반영하지
+        // 않으므로(rabbit/airport처럼) visible은 항상 true로 두고, 대신 호버 중이
+        // 아닐 때는 크기를 0으로 줄여서 사실상 안 보이고 겹쳐 그려지지도 않게 한다.
+        this.ghostMesh = new THREE.Mesh(mergedGeometry, material);
+        this.ghostMesh.visible = true;
+        this.ghostMesh.scale.set(0, 0, 0);
+        this.scene.add(this.ghostMesh);
+        this._ghostMatrix = new THREE.Matrix4();
+        this._ghostScale = new THREE.Vector3();
     }
 
     render(gl, args) {
@@ -193,6 +214,20 @@ export default class KoreanAirModel {
         const instanceMatrix = this._instanceMatrix ?? (this._instanceMatrix = new THREE.Matrix4());
         const labelNdc = this._labelNdc ?? (this._labelNdc = new THREE.Vector3());
 
+        // InstancedMesh.raycast()는 인스턴스별 사전 필터링이 없어 3D 레이캐스팅으로
+        // 호버를 판정하면 비행기 수만큼(수백 대) 매 마우스무브마다 전체 삼각형을
+        // 훑어서 매우 느려진다. 대신 라벨 위치 계산과 같은 화면 좌표(픽셀)를 재사용해
+        // "마우스와 가장 가까운 비행기"를 찾는 2D 방식으로 호버를 판정한다.
+        const canvas = this.map.getCanvas();
+        const pointerNDC = this.hoverOutline.pointerNDC;
+        const pointerPx = {
+            x: (pointerNDC.x * 0.5 + 0.5) * canvas.width,
+            y: (1 - (pointerNDC.y * 0.5 + 0.5)) * canvas.height
+        };
+        const hoverRadiusPx = 25;
+        let hoveredIndex = -1;
+        let hoveredDistSq = hoverRadiusPx * hoverRadiusPx;
+
         this.planes.forEach((plane, i) => {
             this.updatePlane(plane, dt);
 
@@ -214,6 +249,14 @@ export default class KoreanAirModel {
 
             labelNdc.set(mercator.x, mercator.y, mercator.z).applyMatrix4(m);
             this.labels[i].updateFromNDC(labelNdc.x, labelNdc.y);
+
+            const px = (labelNdc.x * 0.5 + 0.5) * canvas.width;
+            const py = (1 - (labelNdc.y * 0.5 + 0.5)) * canvas.height;
+            const distSq = (px - pointerPx.x) ** 2 + (py - pointerPx.y) ** 2;
+            if (distSq < hoveredDistSq) {
+                hoveredDistSq = distSq;
+                hoveredIndex = i;
+            }
         });
 
         if (this.instancedMesh) {
@@ -222,6 +265,28 @@ export default class KoreanAirModel {
 
         this.renderer.resetState();
         this.renderer.render(this.scene, this.camera);
+
+        if (this.instancedMesh) {
+            if (hoveredIndex >= 0) {
+                this.instancedMesh.getMatrixAt(hoveredIndex, this._ghostMatrix);
+                this._ghostMatrix.decompose(this.ghostMesh.position, this.ghostMesh.quaternion, this._ghostScale);
+                // 인스턴스 스케일은 (scale, -scale, scale)처럼 축 하나가 음수라
+                // decompose가 부호를 다른 축으로 옮겨 담을 수 있다. 크기(절대값)만
+                // 취해 항상 양수로 맞춘다 (미러링 여부는 외곽선 표시에 영향 없음).
+                this.ghostMesh.scale.set(
+                    Math.abs(this._ghostScale.x),
+                    Math.abs(this._ghostScale.y),
+                    Math.abs(this._ghostScale.z)
+                );
+                this.hoverOutline.setSelected(this.ghostMesh);
+            } else {
+                this.ghostMesh.scale.set(0, 0, 0);
+                this.hoverOutline.setSelected(null);
+            }
+
+            this.hoverOutline.render();
+        }
+
         this.map.triggerRepaint();
     }
 }
