@@ -68,6 +68,12 @@ export default class RabbitModel {
                 gltf.scene.scale.set(this.meshScale[0], this.meshScale[1], this.meshScale[2]);
                 this.scene.add(gltf.scene);
                 this.modelRoot = gltf.scene;
+                // 라벨 위치(로컬 좌표): x/z는 바운딩 박스 중앙, y는 바닥에서
+                // "높이 * 1.2" 만큼 띄운 지점(모델 꼭대기보다 살짝 위)으로 정정.
+                const box = new THREE.Box3().setFromObject(gltf.scene);
+                const center = box.getCenter(new THREE.Vector3());
+                const height = box.max.y - box.min.y;
+                this.modelCenterLocal = new THREE.Vector3(center.x, box.min.y + height * 1.2, center.z);
             },
             undefined,
             (error) => {
@@ -96,14 +102,6 @@ export default class RabbitModel {
 
         const m = new THREE.Matrix4().fromArray(args.defaultProjectionData.mainMatrix);
 
-        // 모델 원점(translate)을 화면 좌표로 투영해 라벨을 같은 위치로 갱신
-        const labelNdc = new THREE.Vector3(
-            modelTransform.translateX,
-            modelTransform.translateY,
-            modelTransform.translateZ
-        ).applyMatrix4(m);
-        this.label.updateFromNDC(labelNdc.x, labelNdc.y);
-
         const l = new THREE.Matrix4()
             .makeTranslation(modelTransform.translateX, modelTransform.translateY, modelTransform.translateZ)
             .scale(new THREE.Vector3(modelTransform.scale, -modelTransform.scale, modelTransform.scale))
@@ -112,6 +110,14 @@ export default class RabbitModel {
             .multiply(rotationZ);
 
         this.camera.projectionMatrix = m.multiply(l);
+
+        // 모델의 바운딩 박스 중심(로컬 좌표)을 (m*l)로 그대로 투영하면
+        // 화면상 모델의 정가운데(width/2, height/2) 좌표가 나온다.
+        if (this.modelCenterLocal) {
+            const labelNdc = this.modelCenterLocal.clone().applyMatrix4(this.camera.projectionMatrix);
+            this.label.updateFromNDC(labelNdc.x, labelNdc.y);
+        }
+
         this.renderer.resetState();
         this.renderer.render(this.scene, this.camera);
 
