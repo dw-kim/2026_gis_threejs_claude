@@ -164,6 +164,16 @@ export default class KoreanAirModel {
             return;
         }
 
+        // 라벨 위치(로컬 좌표): x/z는 바운딩 박스 중앙, y는 바닥에서
+        // "높이 * 1.2" 만큼 띄운 지점(모델 꼭대기보다 살짝 위)으로 정정.
+        // (기체별 위치는 instanceMatrix로 다르지만, 로컬 지오메트리 자체는 공유하므로
+        // 이 지점 하나를 매 프레임 각 인스턴스의 instanceMatrix로 변환해서 쓴다)
+        mergedGeometry.computeBoundingBox();
+        const box = mergedGeometry.boundingBox;
+        const center = box.getCenter(new THREE.Vector3());
+        const height = box.max.y - box.min.y;
+        this.modelCenterLocal = new THREE.Vector3(center.x, box.min.y + height * 1.2, center.z);
+
         // mergeGeometries가 계산하는 바운딩 스피어는 mercator 변환 전(로컬) 좌표
         // 기준이라 실제 렌더링 위치와 무관하다. InstancedMesh.raycast()는 이
         // 바운딩 스피어로 먼저 "레이가 근처를 지나가는지" 걸러내는데, 그 결과
@@ -247,7 +257,12 @@ export default class KoreanAirModel {
                 this.instancedMesh.setMatrixAt(i, instanceMatrix);
             }
 
-            labelNdc.set(mercator.x, mercator.y, mercator.z).applyMatrix4(m);
+            // 라벨은 원점(translate)이 아니라 기체 바운딩 박스 정중앙을 투영해 갱신
+            if (this.modelCenterLocal) {
+                labelNdc.copy(this.modelCenterLocal).applyMatrix4(instanceMatrix).applyMatrix4(m);
+            } else {
+                labelNdc.set(mercator.x, mercator.y, mercator.z).applyMatrix4(m);
+            }
             this.labels[i].updateFromNDC(labelNdc.x, labelNdc.y);
 
             const px = (labelNdc.x * 0.5 + 0.5) * canvas.width;

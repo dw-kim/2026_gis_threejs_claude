@@ -1,7 +1,7 @@
 // 3D 모델 위에 떠 있는 HTML 텍스트 라벨.
 // 매 프레임 모델의 정규화된 화면 좌표(NDC)를 받아 픽셀 위치로 갱신한다.
 export default class ModelLabel {
-    constructor(map, text, { offsetY = -30, updateIntervalMs = 50 } = {}) {
+    constructor(map, text, { offsetY = 0, updateIntervalMs = 50 } = {}) {
         this.map = map;
         this.offsetY = offsetY;
         this.updateIntervalMs = updateIntervalMs;
@@ -32,7 +32,8 @@ export default class ModelLabel {
 
         this.el.style.display = 'block';
         // left/top(레이아웃 리플로우 유발) 대신 transform(합성만 발생)으로 위치 갱신
-        this.el.style.transform = `translate3d(${x}px, ${y}px, 0) translate(-50%, -100%)`;
+        // translate(-50%, -50%): 라벨을 모델 원점(정가운데) 기준으로 정렬
+        this.el.style.transform = `translate3d(${x}px, ${y}px, 0) translate(-50%, -50%)`;
     }
 
     remove() {
