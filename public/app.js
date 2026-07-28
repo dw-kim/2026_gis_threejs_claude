@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import KoreanAirModel from './component/airplain.js';
-import RabbitModel from './component/airport_1terminal.js';
+import BUS_G7 from './component/bus_g7.js';
 
 const socket = io();
 
@@ -17,6 +16,7 @@ const map = new maplibregl.Map({
                     'https://a.tile.openstreetmap.org/{z}/{x}/{y}.png'
                 ],
                 tileSize: 256,
+                maxzoom: 19, // 실제 타일은 19까지만 존재 → 그 이상은 자동으로 오버줌(확대)해서 재사용
                 attribution: '&copy; OpenStreetMap Contributors'
             },
             'terrainSource': {
@@ -28,9 +28,9 @@ const map = new maplibregl.Map({
             {
                 id: 'osm-layer',
                 type: 'raster',
-                source: 'osm',
-                minzoom: 0,
-                maxzoom: 19
+                source: 'osm'
+                // 레이어 자체의 maxzoom은 "이 줌부터 레이어를 안 그림"을 뜻하므로
+                // 지정하지 않는다 (지정 시 그 줌 이상에서 지도가 하얗게 사라짐).
             }
         ],
         terrain: {
@@ -39,38 +39,29 @@ const map = new maplibregl.Map({
         },
         sky: {}
     },
-    center: [126.4570, 37.4780], // 인천공항 화물터미널 C동 인근
-    zoom: 14.5,
-    pitch: 65,
-    bearing: -125, // 터미널 방향에 맞춰 약간 회전
+    center: [126.925081, 37.557923],
+    zoom: 17,
+    pitch: 45,
+    bearing: 0,
     maxPitch: 85
 });
 
 map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }));
 map.addControl(new maplibregl.TerrainControl({ source: 'terrainSource' }));
 
-// 드래그 이동 및 대한항공 함대의 기준 위치로 쓰이는 좌표(공항 모델은 제거됨)
-const modelOrigin = [126.4280, 37.4600];
-let modelElevationOffset = -530;
+// 드래그 이동 대상 기준 좌표
+const modelOrigin = [126.925220, 37.557808];
 
-// 토끼 모델 배치 (별도 위경도/회전)
-const rabbitModelLayer = new RabbitModel(map, {
-    origin: [126.4509, 37.4500419],
-    rotate: [Math.PI / 2, THREE.MathUtils.degToRad(0.2), 0],
-    elevationOffset: -70
-});
-
-// 대한항공 모델 20대를 InstancedMesh 하나로 그려 기준 위치 근처에서 랜덤 비행
-const koreanAirModelLayer = new KoreanAirModel(map, {
-    count: 100,
-    labelPrefix: 'KoreanAirModel',
+// 버스(G7 1350 6x4) 모델 배치, modelOrigin을 그대로 써서 드래그로 이동 가능
+const busG7Layer = new BUS_G7(map, {
     origin: modelOrigin,
-    getElevationOffsetBase: () => modelElevationOffset
+    rotate: [Math.PI / 2, THREE.MathUtils.degToRad(-45), 0],
+    elevationOffset: 1,
+    scaleMultiplier: 1
 });
 
 map.on('load', () => {
-    map.addLayer(rabbitModelLayer);
-    map.addLayer(koreanAirModelLayer);
+    map.addLayer(busG7Layer);
 });
 
 // 마우스 드래그로 모델 이동 (모델 근처 클릭 후 드래그: 수평 이동 / Shift+드래그: 고도 이동)
@@ -99,7 +90,7 @@ map.on('mousemove', (e) => {
 
     if (isVerticalDrag) {
         const deltaY = dragLastPoint.y - e.point.y; // 위로 드래그하면 고도 증가
-        modelElevationOffset += deltaY * 2; // 픽셀당 약 2m, 필요시 배율 조정
+        busG7Layer.elevationOffset += deltaY * 2; // 픽셀당 약 2m, 필요시 배율 조정
     } else {
         const newLngLat = map.unproject(e.point);
         modelOrigin[0] = newLngLat.lng;
@@ -116,13 +107,13 @@ function endModelDrag() {
     map.dragPan.enable();
     map.dragRotate.enable();
     map.getCanvas().style.cursor = '';
-    console.log('modelOrigin:', modelOrigin, 'modelElevationOffset:', modelElevationOffset);
+    console.log('modelOrigin:', modelOrigin, 'modelElevationOffset:', busG7Layer.elevationOffset);
 }
 
 map.on('mouseup', endModelDrag);
 map.on('mouseleave', endModelDrag);
 
-// 화면 좌측 상단에 마우스 좌표(경도/위도), 지도 회전각(bearing), FPS 표시
+// 화면 좌측 상단에 마우스 좌표(경도/위도), 지도 회전각(bearing), 줌 레벨, FPS 표시
 const coordsEl = document.getElementById('coords');
 let lastLngLat = null;
 let currentFps = 0;
@@ -130,7 +121,7 @@ let currentFps = 0;
 function renderCoordsLabel() {
     const lngText = lastLngLat ? lastLngLat.lng.toFixed(6) : '-';
     const latText = lastLngLat ? lastLngLat.lat.toFixed(6) : '-';
-    coordsEl.textContent = `Lng: ${lngText}, Lat: ${latText}, Rotate: ${map.getBearing().toFixed(1)}°, FPS: ${currentFps}`;
+    coordsEl.textContent = `Lng: ${lngText}, Lat: ${latText}, Rotate: ${map.getBearing().toFixed(1)}°, Pitch: ${map.getPitch().toFixed(1)}°, Zoom: ${map.getZoom().toFixed(2)}, FPS: ${currentFps}`;
 }
 
 map.on('mousemove', (e) => {
@@ -138,6 +129,8 @@ map.on('mousemove', (e) => {
     renderCoordsLabel();
 });
 map.on('rotate', renderCoordsLabel);
+map.on('zoom', renderCoordsLabel);
+map.on('pitch', renderCoordsLabel);
 
 // FPS 계산 (0.5초마다 갱신)
 let fpsFrameCount = 0;
