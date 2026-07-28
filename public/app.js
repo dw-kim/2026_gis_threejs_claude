@@ -200,6 +200,7 @@ socket.on('locations-updated', (usersArray) => {
         }
     }
 
+    
     // 위치 업데이트 또는 새 마커 생성
     usersArray.forEach(([id, data]) => {
         if (markers.has(id)) {
