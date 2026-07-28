@@ -62,7 +62,7 @@ const rabbitModelLayer = new RabbitModel(map, {
 
 // 대한항공 모델 20대를 InstancedMesh 하나로 그려 기준 위치 근처에서 랜덤 비행
 const koreanAirModelLayer = new KoreanAirModel(map, {
-    count: 1000,
+    count: 100,
     labelPrefix: 'KoreanAirModel',
     origin: modelOrigin,
     getElevationOffsetBase: () => modelElevationOffset
