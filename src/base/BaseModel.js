@@ -87,7 +87,7 @@ export default class BaseModel {
     static computeLabelPointFromBox(box) {
         const center = box.getCenter(new THREE.Vector3());
         const height = box.max.y - box.min.y;
-        return new THREE.Vector3(center.x, box.min.y + height * 1.2, center.z);
+        return new THREE.Vector3(center.x, box.min.y + height * 1.5, center.z);
     }
 
     // rotateX/Y/Z + translate + scale로 로컬(모델) -> 월드(mercator) 변환행렬을 만든다.
