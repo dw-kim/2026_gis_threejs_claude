@@ -1,13 +1,15 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import BaseModel from '../base/BaseModel.js';
 import ModelLabel from './modelLabel.js';
-import HoverOutline from '../effect/hoverOutline.js';
 
 // 대한항공(korean_air.gltf) 모델 여러 대를 THREE.InstancedMesh 하나로 그리는
 // MapLibre 커스텀 레이어 클래스. 비행기가 많아져도 씬/렌더러/드로우콜은 하나뿐이라
 // 개별 레이어로 N개를 추가하는 것보다 훨씬 가볍다.
-export default class KoreanAirModel {
+// (인스턴스별 상태 갱신이 필요해 BaseModel의 renderSingleModel()은 쓰지 않고
+// onAdd/조명/렌더러/호버 아웃라인 초기화만 상속받아 재사용한다.)
+export default class KoreanAirModel extends BaseModel {
     constructor(map, {
         id = '3d-korean-air-model',
         modelUrl = '/modeling/airport/korean_air.gltf',
@@ -21,12 +23,9 @@ export default class KoreanAirModel {
         modelScale = 0.01,
         randomMoveIntervalMs = 5000, // 새 목표 지점을 뽑는 주기
         randomMoveRadius = 3000 // 기준 위치로부터 목표 지점을 뽑는 반경(m)
-    }) {
-        this.id = id;
-        this.type = 'custom';
-        this.renderingMode = '3d';
+    } = {}) {
+        super(map, { id });
 
-        this.map = map;
         this.modelUrl = modelUrl;
         this.count = count;
         this.labelPrefix = labelPrefix;
@@ -98,20 +97,8 @@ export default class KoreanAirModel {
         }
     }
 
-    onAdd(map, gl) {
-        this.camera = new THREE.Camera();
-        this.scene = new THREE.Scene();
-
-        const directionalLight = new THREE.DirectionalLight(0xffffff);
-        directionalLight.position.set(0, -70, 100).normalize();
-        this.scene.add(directionalLight);
-
-        const directionalLight2 = new THREE.DirectionalLight(0xffffff);
-        directionalLight2.position.set(0, 70, 100).normalize();
-        this.scene.add(directionalLight2);
-
-        // 방향광만 있으면 그림자 쪽 면이 새까맣게 나와 깨져 보이므로 주변광을 더한다.
-        this.scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+    loadModel() {
+        this.labels = Array.from({ length: this.count }, (_, i) => new ModelLabel(this.map, `${this.labelPrefix}-${i}`));
 
         const loader = new GLTFLoader();
         loader.load(
@@ -122,17 +109,6 @@ export default class KoreanAirModel {
                 console.error('대한항공 모델 로드 실패:', error);
             }
         );
-
-        this.map = map;
-        this.renderer = new THREE.WebGLRenderer({
-            canvas: map.getCanvas(),
-            context: gl,
-            antialias: true
-        });
-        this.renderer.autoClear = false;
-
-        this.labels = Array.from({ length: this.count }, (_, i) => new ModelLabel(map, `${this.labelPrefix}-${i}`));
-        this.hoverOutline = new HoverOutline(map, this.renderer, this.scene, this.camera);
     }
 
     // 로드된 gltf의 모든 메시를 하나의 지오메트리로 합쳐 InstancedMesh를 만든다.
@@ -168,11 +144,7 @@ export default class KoreanAirModel {
         // "높이 * 1.2" 만큼 띄운 지점(모델 꼭대기보다 살짝 위)으로 정정.
         // (기체별 위치는 instanceMatrix로 다르지만, 로컬 지오메트리 자체는 공유하므로
         // 이 지점 하나를 매 프레임 각 인스턴스의 instanceMatrix로 변환해서 쓴다)
-        mergedGeometry.computeBoundingBox();
-        const box = mergedGeometry.boundingBox;
-        const center = box.getCenter(new THREE.Vector3());
-        const height = box.max.y - box.min.y;
-        this.modelCenterLocal = new THREE.Vector3(center.x, box.min.y + height * 1.2, center.z);
+        this.modelCenterLocal = BaseModel.computeLabelPointFromGeometry(mergedGeometry);
 
         // mergeGeometries가 계산하는 바운딩 스피어는 mercator 변환 전(로컬) 좌표
         // 기준이라 실제 렌더링 위치와 무관하다. InstancedMesh.raycast()는 이
@@ -204,6 +176,8 @@ export default class KoreanAirModel {
     }
 
     render(gl, args) {
+        this.syncRendererSize();
+
         const now = performance.now();
         const dt = this.lastFrameTime === null ? 0 : (now - this.lastFrameTime) / 1000;
         this.lastFrameTime = now;

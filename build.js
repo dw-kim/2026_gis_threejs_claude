@@ -44,9 +44,11 @@ async function build() {
       allowOverwrite: true
     });
 
-    // 번들에 합쳐진 컴포넌트/이펙트 소스는 dist에 따로 둘 필요가 없으니 정리한다.
+    // 번들에 합쳐진 컴포넌트/이펙트/베이스/믹스인 소스는 dist에 따로 둘 필요가 없으니 정리한다.
     fs.rmSync(path.join(publicDist, 'component'), { recursive: true, force: true });
     fs.rmSync(path.join(publicDist, 'effect'), { recursive: true, force: true });
+    fs.rmSync(path.join(publicDist, 'base'), { recursive: true, force: true });
+    fs.rmSync(path.join(publicDist, 'mixin'), { recursive: true, force: true });
 
     // 4. Copy server.js to dist/server.js
     console.log('Copying server.js...');

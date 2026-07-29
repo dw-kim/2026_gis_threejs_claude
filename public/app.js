@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import BUS_G7 from './component/bus_g7.js';
+import BusApiMixin from './mixin/api.js';
 
 const socket = io();
 
@@ -39,10 +40,10 @@ const map = new maplibregl.Map({
         },
         sky: {}
     },
-    center: [126.925081, 37.557923],
-    zoom: 17,
-    pitch: 45,
-    bearing: 0,
+    center: [126.925173, 37.557784],
+    zoom: 20.5,
+    pitch: 66.9,
+    bearing: -35.2,
     maxPitch: 85
 });
 
@@ -62,6 +63,16 @@ const busG7Layer = new BUS_G7(map, {
 
 map.on('load', () => {
     map.addLayer(busG7Layer);
+});
+
+// BusApiMixin을 명시적으로 섞은 컴포넌트만 버스 위치 API를 호출한다.
+// (믹스인을 적용하지 않으면 startBusPositionPolling 자체가 없어 호출이 전혀 일어나지 않는다)
+Object.assign(BUS_G7.prototype, BusApiMixin);
+busG7Layer.startBusPositionPolling({
+    busRouteId: '113900012',
+    onUpdate: (positions) => {
+        console.log('버스 위치:', positions);
+    }
 });
 
 // 마우스 드래그로 모델 이동 (모델 근처 클릭 후 드래그: 수평 이동 / Shift+드래그: 고도 이동)
@@ -159,62 +170,3 @@ function updateCompass() {
 }
 map.on('rotate', updateCompass);
 updateCompass();
-
-const markers = new Map();
-
-// 내 위치 추적 및 전송
-if ("geolocation" in navigator) {
-    navigator.geolocation.watchPosition((position) => {
-        const { latitude, longitude } = position.coords;
-        
-        socket.emit('update-location', {
-            lat: latitude,
-            lng: longitude
-        });
-
-        // 맵 중심 이동 (옵션: 처음 한번만 하거나 버튼 클릭 시)
-        // map.flyTo({ center: [longitude, latitude] });
-    }, (error) => {
-        console.error("Error getting location:", error);
-    }, {
-        enableHighAccuracy: true,
-        timeout: 5000,
-        maximumAge: 0
-    });
-} else {
-    alert("Geolocation을 지원하지 않는 브라우저입니다.");
-}
-
-// 다른 사용자 위치 업데이트 수신
-socket.on('locations-updated', (usersArray) => {
-    // usersArray: [ [socketId, {lat, lng}], ... ]
-    
-    // 현재 활성 사용자 ID 세트
-    const currentIds = new Set(usersArray.map(([id]) => id));
-
-    // 연결 끊긴 마커 제거
-    for (const [id, marker] of markers.entries()) {
-        if (!currentIds.has(id)) {
-            marker.remove();
-            markers.delete(id);
-        }
-    }
-
-    
-    // 위치 업데이트 또는 새 마커 생성
-    usersArray.forEach(([id, data]) => {
-        if (markers.has(id)) {
-            markers.get(id).setLngLat([data.lng, data.lat]);
-        } else {
-            const el = document.createElement('div');
-            el.className = 'user-marker';
-            if (id === socket.id) el.classList.add('self-marker');
-
-            const marker = new maplibregl.Marker(el)
-                .setLngLat([data.lng, data.lat])
-                .addTo(map);
-            
-            markers.set(id, marker);
-        }
-    });
-});
