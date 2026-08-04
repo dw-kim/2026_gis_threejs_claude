@@ -1,7 +1,7 @@
 // 3D 모델 위에 떠 있는 HTML 텍스트 라벨.
 // 매 프레임 모델의 정규화된 화면 좌표(NDC)를 받아 픽셀 위치로 갱신한다.
 export default class ModelLabel {
-    constructor(map, text, { offsetY = 0, updateIntervalMs = 50 } = {}) {
+    constructor(map, text, { offsetY = 0, updateIntervalMs = 0 } = {}) {
         this.map = map;
         this.offsetY = offsetY;
         this.updateIntervalMs = updateIntervalMs;
@@ -18,9 +18,10 @@ export default class ModelLabel {
     // ndcX, ndcY: THREE.Vector3.applyMatrix4()로 얻은 -1~1 범위의 정규화된 화면 좌표
     updateFromNDC(ndcX, ndcY) {
         const now = performance.now();
-        // left/top 대신 매번 갱신하면 비행기 수가 많을 때 부담이 크므로
-        // 초당 갱신 횟수를 제한한다 (기본 20fps).
-        if (now - this.lastUpdateTime < this.updateIntervalMs) return;
+        // 기본값은 스로틀링 없음(매 프레임 갱신) — 모델이 매 프레임 부드럽게 움직이는데
+        // 라벨만 느리게 갱신되면 따로 노는 것처럼 끊겨 보인다. 인스턴스가 아주 많은
+        // 경우(예: 비행기 편대)에만 updateIntervalMs를 옵션으로 넘겨 부담을 줄인다.
+        if (this.updateIntervalMs > 0 && now - this.lastUpdateTime < this.updateIntervalMs) return;
         this.lastUpdateTime = now;
 
         const canvas = this.map.getCanvas();

@@ -98,7 +98,11 @@ export default class KoreanAirModel extends BaseModel {
     }
 
     loadModel() {
-        this.labels = Array.from({ length: this.count }, (_, i) => new ModelLabel(this.map, `${this.labelPrefix}-${i}`));
+        // 비행기가 많을 때는 라벨을 매 프레임 갱신하면 부담이 커서 초당 20회로 제한한다.
+        this.labels = Array.from(
+            { length: this.count },
+            (_, i) => new ModelLabel(this.map, `${this.labelPrefix}-${i}`, { updateIntervalMs: 50 })
+        );
 
         const loader = new GLTFLoader();
         loader.load(

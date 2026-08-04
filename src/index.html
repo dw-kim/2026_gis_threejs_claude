@@ -8,17 +8,6 @@
     <style>
         body { margin: 0; padding: 0; overflow: hidden; }
         #map { position: absolute; top: 0; bottom: 0; width: 100%; }
-        .user-marker {
-            width: 20px;
-            height: 20px;
-            background-color: #007bff;
-            border: 2px solid white;
-            border-radius: 50%;
-            cursor: pointer;
-        }
-        .self-marker {
-            background-color: #28a745;
-        }
         .model-label {
             position: absolute;
             left: 0;
@@ -68,6 +57,26 @@
         #compass .dir-e { top: 50%; right: 4px; transform: translateY(-50%); }
         #compass .dir-s { bottom: 4px; left: 50%; transform: translateX(-50%); }
         #compass .dir-w { top: 50%; left: 4px; transform: translateY(-50%); }
+        .shuttle-point-icon {
+            position: relative;
+            width: 22px;
+            height: 22px;
+            border-radius: 50% 50% 50% 0;
+            transform: rotate(-45deg);
+            background: #ff9800;
+            border: 2px solid #fff;
+            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+        }
+        .shuttle-point-icon span {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) rotate(45deg);
+            color: #fff;
+            font-family: monospace;
+            font-size: 10px;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
@@ -80,7 +89,6 @@
         <span class="dir dir-w">W</span>
     </div>
 
-    <script src="/socket.io/socket.io.js"></script>
     <script src="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
     <script type="importmap">
         {
