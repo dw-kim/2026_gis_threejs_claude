@@ -146,6 +146,7 @@ busLayer.startBusPositionPolling({
 const BUS_MOVE_DURATION_MS = 10000;
 const BUS_COLLISION_RADIUS_M = 15; // 편대 버스와 이 거리(m) 안으로 가까워지면 잠시 멈춘다
 let busMoveAnimationId = null;
+let isSingleBusMoving = false; // 버스 정보 패널의 상태 표시(녹색/빨간색)에 쓰인다
 
 // busFleetLayer 소속 버스 중 하나라도 modelOrigin과 이 거리 안에 있는지 확인한다.
 function isBusNearFleet() {
@@ -182,7 +183,9 @@ function moveBusTo(targetLngLat, durationMs = BUS_MOVE_DURATION_MS, onArrive) {
         const dt = now - lastTime;
         lastTime = now;
 
-        if (!isBusNearFleet()) {
+        const nearFleet = isBusNearFleet();
+        isSingleBusMoving = !nearFleet;
+        if (!nearFleet) {
             elapsedMs += dt;
         }
 
@@ -195,6 +198,7 @@ function moveBusTo(targetLngLat, durationMs = BUS_MOVE_DURATION_MS, onArrive) {
             busMoveAnimationId = requestAnimationFrame(step);
         } else {
             busMoveAnimationId = null;
+            isSingleBusMoving = false;
             if (onArrive) onArrive();
         }
     }
@@ -203,7 +207,7 @@ function moveBusTo(targetLngLat, durationMs = BUS_MOVE_DURATION_MS, onArrive) {
 }
 
 map.on('click', (e) => {
-    moveBusTo(e.lngLat, BUS_MOVE_DURATION_MS);
+    // moveBusTo(e.lngLat, BUS_MOVE_DURATION_MS);
 });
 
 // 버스가 아래 경로(shuttlePoints)를 순서대로 따라가다가 마지막 지점에
@@ -214,7 +218,6 @@ const shuttlePoints = [
     { lng: 126.921441, lat: 37.556294 },
     { lng: 126.921832, lat: 37.556899 },
     { lng: 126.922311, lat: 37.556489 },
-    { lng: 126.923643, lat: 37.557476 },
     { lng: 126.923643, lat: 37.557476 },
     { lng: 126.924342, lat: 37.558001 },
     { lng: 126.924894, lat: 37.558680 },
@@ -318,3 +321,96 @@ function updateCompass() {
 }
 map.on('rotate', updateCompass);
 updateCompass();
+
+// ===== 오른쪽 버스 정보 패널 =====
+// 단일 버스 + 편대 버스 전체를 한 목록으로 모은다. position은 각 컴포넌트가
+// 매 프레임 갱신하는 배열을 그대로 참조하므로, 여기서 다시 조회할 필요 없이
+// 그 배열의 최신 값을 읽기만 하면 된다.
+function getTrackableBuses() {
+    const list = [{
+        label: 'BUS_G7',
+        position: modelOrigin,
+        // 편대 버스는 idleMs===0일 때 "이번 프레임에 실제로 움직였다"는 뜻이라
+        // 그대로 재사용하고, 단일 버스는 별도로 추적하는 플래그를 읽는다.
+        isMoving: () => isSingleBusMoving
+    }];
+    busFleetLayer.buses.forEach((bus, i) => {
+        list.push({
+            label: `BusModel-${i}`,
+            position: bus.position,
+            isMoving: () => bus.idleMs === 0
+        });
+    });
+    return list;
+}
+
+const trackableBuses = getTrackableBuses();
+const busPanelBody = document.getElementById('bus-panel-body');
+const busPanelRows = [];
+let followedBusIndex = null;
+
+function setFollowedBus(index) {
+    // 같은 행을 다시 클릭하면 추적을 해제한다.
+    followedBusIndex = followedBusIndex === index ? null : index;
+
+    busPanelRows.forEach((row, i) => {
+        row.tr.classList.toggle('selected', i === followedBusIndex);
+    });
+
+    if (followedBusIndex !== null) {
+        const target = trackableBuses[followedBusIndex];
+        map.easeTo({ center: [target.position[0], target.position[1]], zoom: 20, duration: 800 });
+    }
+}
+
+// 행(DOM)은 한 번만 만들고, 매 프레임에는 텍스트만 갱신한다 (100여 개를 매번
+// 새로 그리면 훨씬 비싸다).
+trackableBuses.forEach((bus, i) => {
+    const tr = document.createElement('tr');
+    const statusTd = document.createElement('td');
+    const statusDot = document.createElement('span');
+    const labelTd = document.createElement('td');
+    const lngTd = document.createElement('td');
+    const latTd = document.createElement('td');
+
+    statusDot.className = 'bus-status-dot';
+    statusTd.appendChild(statusDot);
+    labelTd.textContent = bus.label;
+    tr.append(statusTd, labelTd, lngTd, latTd);
+    tr.addEventListener('click', () => setFollowedBus(i));
+    busPanelBody.appendChild(tr);
+
+    busPanelRows.push({ tr, statusDot, lngTd, latTd });
+});
+
+let busPanelLastUpdate = 0;
+
+function updateBusPanel(now) {
+    // 단일 버스는 편대와 달리 라벨을 자기 자신(bus_g7.js)이 매 프레임 그리지 않고
+    // app.js가 위치를 밀어주는 구조라, 이동 상태 점(dot)도 여기서 함께 갱신한다.
+    if (busLayer.label) {
+        busLayer.label.setMoving(isSingleBusMoving);
+    }
+
+    // 100여 개 행의 텍스트를 매 프레임 갱신하면 부담이 있어 초당 몇 번으로 제한.
+    if (now - busPanelLastUpdate >= 200) {
+        busPanelLastUpdate = now;
+        trackableBuses.forEach((bus, i) => {
+            const row = busPanelRows[i];
+            row.lngTd.textContent = bus.position[0].toFixed(6);
+            row.latTd.textContent = bus.position[1].toFixed(6);
+            row.statusDot.style.background = bus.isMoving() ? '#4caf50' : '#f44336';
+        });
+    }
+
+    // 선택된 버스가 있으면 카메라 중심을 계속 그 버스 위치로 고정해 따라가게 한다.
+    // (스페이스바 카메라 고정과 같은 방식: center만 덮어써서 줌/피치/베어링은
+    // 사용자가 계속 조작할 수 있다)
+    if (followedBusIndex !== null) {
+        const target = trackableBuses[followedBusIndex];
+        map.jumpTo({ center: [target.position[0], target.position[1]] });
+    }
+
+    requestAnimationFrame(updateBusPanel);
+}
+requestAnimationFrame(updateBusPanel);

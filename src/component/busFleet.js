@@ -276,6 +276,8 @@ export default class BusFleet extends BaseModel {
                 labelNdc.set(0, 0, 0).applyMatrix4(bus.projectionMatrix);
             }
             this.labels[i].updateFromNDC(labelNdc.x, labelNdc.y);
+            // idleMs===0이면 이번 프레임에 실제로 움직였다는 뜻(updateBus 참고).
+            this.labels[i].setMoving(bus.idleMs === 0);
 
             const px = (labelNdc.x * 0.5 + 0.5) * canvas.width;
             const py = (1 - (labelNdc.y * 0.5 + 0.5)) * canvas.height;

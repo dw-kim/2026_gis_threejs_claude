@@ -9,10 +9,23 @@ export default class ModelLabel {
 
         this.el = document.createElement('div');
         this.el.className = 'model-label';
-        this.el.textContent = text;
         this.el.style.display = 'none';
 
+        // 이동 중/정지 상태를 오른쪽 버스 정보 패널과 같은 방식(녹색/빨간색 점)으로 표시
+        this.dotEl = document.createElement('span');
+        this.dotEl.className = 'model-label-dot';
+        this.el.appendChild(this.dotEl);
+
+        this.textEl = document.createElement('span');
+        this.textEl.textContent = text;
+        this.el.appendChild(this.textEl);
+
         map.getContainer().appendChild(this.el);
+    }
+
+    // 이동 중이면 녹색, 멈춰있으면 빨간색으로 표시한다.
+    setMoving(isMoving) {
+        this.dotEl.style.background = isMoving ? '#4caf50' : '#f44336';
     }
 
     // ndcX, ndcY: THREE.Vector3.applyMatrix4()로 얻은 -1~1 범위의 정규화된 화면 좌표
@@ -31,7 +44,7 @@ export default class ModelLabel {
         const x = (ndcX * 0.5 + 0.5) * width;
         const y = (1 - (ndcY * 0.5 + 0.5)) * height + this.offsetY;
 
-        this.el.style.display = 'block';
+        this.el.style.display = 'flex';
         // left/top(레이아웃 리플로우 유발) 대신 transform(합성만 발생)으로 위치 갱신
         // translate(-50%, -50%): 라벨을 모델 원점(정가운데) 기준으로 정렬
         this.el.style.transform = `translate3d(${x}px, ${y}px, 0) translate(-50%, -50%)`;
