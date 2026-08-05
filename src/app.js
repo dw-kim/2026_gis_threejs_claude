@@ -39,7 +39,7 @@ const map = new maplibregl.Map({
         sky: {}
     },
     center: [126.925116, 37.557961],
-    zoom: 20.5,
+    zoom: 18,
     pitch: 66.9,
     bearing: -35.2,
     maxPitch: 85
@@ -92,7 +92,7 @@ function normalizeAngleDiff(diff) {
 }
 
 // 목표 heading까지 순간적으로 꺾지 않고 1초에 걸쳐 부드럽게(최단 경로로) 회전한다.
-function rotateBusTowards(targetHeading, durationMs = 1000) {
+function rotateBusTowards(targetHeading, durationMs = 600) {
     if (busHeadingAnimationId !== null) {
         cancelAnimationFrame(busHeadingAnimationId);
     }
@@ -143,7 +143,7 @@ busLayer.startBusPositionPolling({
 
 // 지도를 클릭하면 그 위치까지 항상 정해진 시간에 걸쳐 이동 (거리와 상관없이 소요 시간 고정)
 // 이동속도 10배 느리게(1/10) 조정: 3초 -> 30초
-const BUS_MOVE_DURATION_MS = 10000;
+const BUS_MOVE_DURATION_MS = 30000;
 const BUS_COLLISION_RADIUS_M = 15; // 편대 버스와 이 거리(m) 안으로 가까워지면 잠시 멈춘다
 let busMoveAnimationId = null;
 let isSingleBusMoving = false; // 버스 정보 패널의 상태 표시(녹색/빨간색)에 쓰인다
@@ -349,6 +349,28 @@ const busPanelBody = document.getElementById('bus-panel-body');
 const busPanelRows = [];
 let followedBusIndex = null;
 
+// map.easeTo()는 애니메이션 도중 map.jumpTo()가 한 번이라도 호출되면 즉시
+// 끊겨버리는데, 팔로우 루프는 버스를 따라가려고 매 프레임 jumpTo(center)를
+// 불러야 해서 easeTo와 같이 쓸 수 없다. 그래서 줌 전환은 직접 rAF로 보간해서
+// 매 프레임 center와 함께 한 번의 jumpTo로 같이 적용한다.
+let zoomAnim = null; // { fromZoom, toZoom, startTime, durationMs }
+
+function startZoomAnim(toZoom, durationMs = 600) {
+    zoomAnim = { fromZoom: map.getZoom(), toZoom, startTime: performance.now(), durationMs };
+}
+
+function easeInOutQuad(t) {
+    return t < 0.5 ? 2 * t * t : 1 - ((-2 * t + 2) ** 2) / 2;
+}
+
+// 진행 중인 줌 애니메이션 값을 계산하고, 끝났으면 애니메이션 상태를 정리한다.
+function getAnimatedZoom(now) {
+    const t = Math.min(1, (now - zoomAnim.startTime) / zoomAnim.durationMs);
+    const zoom = zoomAnim.fromZoom + (zoomAnim.toZoom - zoomAnim.fromZoom) * easeInOutQuad(t);
+    if (t >= 1) zoomAnim = null;
+    return zoom;
+}
+
 function setFollowedBus(index) {
     // 같은 행을 다시 클릭하면 추적을 해제한다.
     followedBusIndex = followedBusIndex === index ? null : index;
@@ -357,10 +379,7 @@ function setFollowedBus(index) {
         row.tr.classList.toggle('selected', i === followedBusIndex);
     });
 
-    if (followedBusIndex !== null) {
-        const target = trackableBuses[followedBusIndex];
-        map.easeTo({ center: [target.position[0], target.position[1]], zoom: 20, duration: 800 });
-    }
+    startZoomAnim(followedBusIndex !== null ? 20 : 18);
 }
 
 // 행(DOM)은 한 번만 만들고, 매 프레임에는 텍스트만 갱신한다 (100여 개를 매번
@@ -404,11 +423,18 @@ function updateBusPanel(now) {
     }
 
     // 선택된 버스가 있으면 카메라 중심을 계속 그 버스 위치로 고정해 따라가게 한다.
-    // (스페이스바 카메라 고정과 같은 방식: center만 덮어써서 줌/피치/베어링은
-    // 사용자가 계속 조작할 수 있다)
+    // (스페이스바 카메라 고정과 같은 방식: center만 덮어써서 피치/베어링은
+    // 사용자가 계속 조작할 수 있다) 줌 전환 애니메이션이 진행 중이면 같은
+    // jumpTo 호출에 묶어서 함께 적용한다.
     if (followedBusIndex !== null) {
         const target = trackableBuses[followedBusIndex];
-        map.jumpTo({ center: [target.position[0], target.position[1]] });
+        if (zoomAnim) {
+            map.jumpTo({ center: [target.position[0], target.position[1]], zoom: getAnimatedZoom(now) });
+        } else {
+            map.jumpTo({ center: [target.position[0], target.position[1]] });
+        }
+    } else if (zoomAnim) {
+        map.jumpTo({ zoom: getAnimatedZoom(now) });
     }
 
     requestAnimationFrame(updateBusPanel);
