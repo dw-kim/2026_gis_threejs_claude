@@ -63,7 +63,7 @@ npm run build
 
 `build.js`가 하는 일:
 - `public/`(3D 모델, 이미지, 노선 목록 JSON 등 정적 자산)을 `dist/public/`으로 복사
-- `src/index.html`을 `dist/public/index.html`로 복사
+- `index.html`(프로젝트 루트)을 `dist/public/index.html`로 복사
 - `src/app.js`와 그 안에서 import하는 `component/`, `base/`, `effect/`, `mixin/` 하위 소스를 esbuild로 하나의 파일로 번들링·최소화·ES2020 트랜스파일해 `dist/public/app.js`로 생성 (소스맵 포함)
   - `three`, `three/addons/*`는 npm 패키지가 아니라 `index.html`의 importmap으로 CDN에서 로드하므로 번들에서 제외(external)
 - `server.js`, `router.js`(서버 API 라우터)를 `dist/`로 복사
@@ -78,8 +78,9 @@ npm start
 ## 프로젝트 구조
 
 ```
+index.html                    # 진입 페이지, importmap(three/maplibre-gl), 노선 드롭다운 + 버스 패널 마크업
+                               # (server.js가 이 파일만 명시적으로 서빙 — 루트 전체를 열지 않는다)
 src/                          # 프론트엔드 소스 (개발 서버가 정적 루트로 서빙)
-  index.html                   # 진입 페이지, importmap(three/maplibre-gl), 노선 드롭다운 + 버스 패널 마크업
   app.js                        # 지도 초기화, 노선 드롭다운/API 폴링 전환, 버스 정보 패널, 카메라 팔로우,
                                   # 좌표/FPS/컴퍼스 표시
   base/

@@ -28,11 +28,11 @@ async function build() {
     const publicDist = path.join(distDir, 'public');
     fs.cpSync(publicSrc, publicDist, { recursive: true });
 
-    // 3-1. src/index.html도 같은 정적 루트(dist/public)로 복사한다.
-    // (개발 중엔 src/와 public/을 각각 서빙하지만, 배포 산출물은 하나의 정적 루트로 합친다)
-    console.log('Copying src/index.html...');
+    // 3-1. index.html(프로젝트 루트)도 같은 정적 루트(dist/public)로 복사한다.
+    // (개발 중엔 index.html/src/public을 각각 서빙하지만, 배포 산출물은 하나의 정적 루트로 합친다)
+    console.log('Copying index.html...');
     const srcRoot = path.join(srcDir, 'src');
-    fs.copyFileSync(path.join(srcRoot, 'index.html'), path.join(publicDist, 'index.html'));
+    fs.copyFileSync(path.join(srcDir, 'index.html'), path.join(publicDist, 'index.html'));
 
     // 3-2. src/app.js + component/*.js를 하나로 번들링하고 트랜스파일/압축한다.
     // three/three-addons는 npm 패키지가 아니라 index.html의 importmap으로 CDN에서

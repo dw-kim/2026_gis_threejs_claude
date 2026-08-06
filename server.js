@@ -20,8 +20,14 @@ const app = express();
 
 const PORT = process.env.PORT || 3000;
 
-// index.html/app.js 등 소스는 src/, 3D 모델/이미지 같은 정적 자산은 public/에 있어서
-// 둘 다 같은 루트 경로('/')로 서빙한다 (겹치는 파일명이 없어 순서는 상관없다).
+// index.html은 프로젝트 루트에 있지만, 루트 전체를 정적으로 열면 server.js/
+// package.json 같은 소스가 그대로 노출되므로 이 파일 하나만 명시적으로 서빙한다.
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+// app.js/component 등 나머지 프론트 소스는 src/, 3D 모델/이미지 같은 정적 자산은
+// public/에 있어서 둘 다 같은 루트 경로('/')로 서빙한다 (겹치는 파일명이 없어 순서는 상관없다).
 app.use(express.static(path.join(__dirname, 'src')));
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/api', apiRouter);
