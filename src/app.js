@@ -1,4 +1,6 @@
-import LiveBusFleet from './component/liveBusFleet.js';
+import BUS_G7 from './component/bus_g7.js';
+import BusFleet from './component/busFleet.js';
+import RoutePointIcons from './component/routePointIcons.js';
 import BusApiMixin from './mixin/api.js';
 
 // MapLibre 초기화
@@ -19,13 +21,6 @@ const map = new maplibregl.Map({
             'terrainSource': {
                 type: 'raster-dem',
                 url: 'https://tiles.mapterhorn.com/tilejson.json'
-            },
-            // 건물을 입체(fill-extrusion)로 세우려면 높이 속성이 담긴 벡터 타일이
-            // 필요하다. 래스터 타일(이미지)에는 그런 속성이 없어서 무료·키 불필요한
-            // OpenFreeMap의 OpenMapTiles 스키마 벡터 타일을 추가로 쓴다.
-            'openmaptiles': {
-                type: 'vector',
-                url: 'https://tiles.openfreemap.org/planet'
             }
         },
         layers: [
@@ -35,26 +30,6 @@ const map = new maplibregl.Map({
                 source: 'osm'
                 // 레이어 자체의 maxzoom은 "이 줌부터 레이어를 안 그림"을 뜻하므로
                 // 지정하지 않는다 (지정 시 그 줌 이상에서 지도가 하얗게 사라짐).
-            },
-            {
-                id: '3d-buildings',
-                type: 'fill-extrusion',
-                source: 'openmaptiles',
-                'source-layer': 'building',
-                minzoom: 14,
-                paint: {
-                    // 높이에 따라 밝기가 달라지는 색 램프 (낮은 건물은 밝게, 높은 건물은 진하게)
-                    'fill-extrusion-color': [
-                        'interpolate', ['linear'], ['coalesce', ['get', 'render_height'], 5],
-                        0, '#e9edf5',
-                        50, '#9db3d6',
-                        150, '#5c7cad',
-                        300, '#2c4870'
-                    ],
-                    'fill-extrusion-height': ['coalesce', ['get', 'render_height'], 5],
-                    'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], 0],
-                    'fill-extrusion-opacity': 0.85
-                }
             }
         ],
         terrain: {
@@ -73,197 +48,232 @@ const map = new maplibregl.Map({
 map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }));
 map.addControl(new maplibregl.TerrainControl({ source: 'terrainSource' }));
 
-// 서울시 버스 실시간 위치 API 응답(itemList) 개수만큼 버스를 그리는 레이어.
-// 항목 수가 호출마다 달라질 수 있어 plainNo(차량 번호판)를 키로 버스별
-// Object3D/라벨을 새로 만들거나 재사용하거나(운행 종료 등으로) 없어지면 정리한다.
-const liveBusFleetLayer = new LiveBusFleet(map, {
+// 버스 초기 위치
+const modelOrigin = [126.925116, 37.557961];
+
+// 버스(G7) 모델 배치, modelOrigin을 그대로 써서 클릭 이동에 반영
+const busLayer = new BUS_G7(map, {
+    origin: modelOrigin,
+    rotate: [Math.PI / 2, 0, 0],
+    elevationOffset: 1,
+    scaleMultiplier: 1
+});
+
+// 버스 여러 대를 기준 위치 근처에서 5초마다 랜덤 이동시킨다.
+// (InstancedMesh가 아니라 단일 버스와 같은 방식으로 한 대씩 순서대로 그리는데,
+// 버스 OBJ는 서브메시가 40개가 넘어 대수를 늘리면 프레임당 draw call이 급격히
+// 늘어난다. 자동차 편대는 500대로 실험했었지만 버스는 무거우니 10대로 낮췄다.)
+const busFleetLayer = new BusFleet(map, {
+    origin: modelOrigin,
+    count: 100,
     rotateOffset: [Math.PI / 2, 0, 0],
     elevationOffset: 1,
     scaleMultiplier: 1,
-    moveDurationMs: 10000
+    // 경로를 따라 움직이는 단일 버스(busLayer)도 장애물로 보고 피해간다.
+    getExternalObstacles: () => [modelOrigin]
 });
 
 map.on('load', () => {
-    map.addLayer(liveBusFleetLayer);
+    map.addLayer(busLayer);
+    map.addLayer(busFleetLayer);
 });
 
-// ===== 오른쪽 버스 정보 패널 =====
-const busPanelBody = document.getElementById('bus-panel-body');
-const busPanelRowsById = new Map(); // plainNo -> 행 DOM 참조
-let followedBusId = null;
+// 정지 상태의 기본 방향은 모델 좌표계 보정값이라, 진행 방향 회전에도 그대로 더해준다.
+const busBaseYawOffset = busLayer.rotate[1];
+// 이동 중 진행 방향 회전만 따로 보정이 필요할 때 추가로 더해주는 값 (필요시 조정).
+const busMoveYawCorrection = 0;
+let busHeading = 0; // 현재 heading(라디안). rotate[1] = busHeading * -1 + busBaseYawOffset
+let busHeadingAnimationId = null;
 
-// map.easeTo()는 애니메이션 도중 map.jumpTo()가 한 번이라도 호출되면 즉시
-// 끊겨버리는데, 팔로우 루프는 버스를 따라가려고 매 프레임 jumpTo(center)를
-// 불러야 해서 easeTo와 같이 쓸 수 없다. 그래서 줌 전환은 직접 rAF로 보간해서
-// 매 프레임 center와 함께 한 번의 jumpTo로 같이 적용한다.
-let zoomAnim = null; // { fromZoom, toZoom, startTime, durationMs }
-
-function startZoomAnim(toZoom, durationMs = 600) {
-    zoomAnim = { fromZoom: map.getZoom(), toZoom, startTime: performance.now(), durationMs };
+function normalizeAngleDiff(diff) {
+    while (diff > Math.PI) diff -= Math.PI * 2;
+    while (diff < -Math.PI) diff += Math.PI * 2;
+    return diff;
 }
 
-function easeInOutQuad(t) {
-    return t < 0.5 ? 2 * t * t : 1 - ((-2 * t + 2) ** 2) / 2;
-}
+// 목표 heading까지 순간적으로 꺾지 않고 1초에 걸쳐 부드럽게(최단 경로로) 회전한다.
+function rotateBusTowards(targetHeading, durationMs = 600) {
+    if (busHeadingAnimationId !== null) {
+        cancelAnimationFrame(busHeadingAnimationId);
+    }
 
-// 진행 중인 줌 애니메이션 값을 계산하고, 끝났으면 애니메이션 상태를 정리한다.
-function getAnimatedZoom(now) {
-    const t = Math.min(1, (now - zoomAnim.startTime) / zoomAnim.durationMs);
-    const zoom = zoomAnim.fromZoom + (zoomAnim.toZoom - zoomAnim.fromZoom) * easeInOutQuad(t);
-    if (t >= 1) zoomAnim = null;
-    return zoom;
-}
+    const startHeading = busHeading;
+    const diff = normalizeAngleDiff(targetHeading - startHeading);
+    const startTime = performance.now();
 
-function setFollowedBus(id) {
-    // 같은 행을 다시 클릭하면 추적을 해제한다.
-    followedBusId = followedBusId === id ? null : id;
+    function step(now) {
+        const t = Math.min(1, (now - startTime) / durationMs);
+        busHeading = startHeading + diff * t;
 
-    busPanelRowsById.forEach((row, rowId) => {
-        row.tr.classList.toggle('selected', rowId === followedBusId);
-    });
+        busLayer.rotate[1] = busHeading * -1 + busBaseYawOffset + busMoveYawCorrection;
+        map.triggerRepaint();
 
-    startZoomAnim(followedBusId !== null ? 20 : 18);
-}
-
-// API 응답을 받을 때마다 호출: 패널 행을 최신 목록에 맞게 갱신한다.
-// (행 DOM은 plainNo별로 재사용하고, 이번 응답에 없는 버스만 행을 지운다)
-function renderBusPanel(items) {
-    const seenIds = new Set(items.map((item) => item.id));
-
-    Array.from(busPanelRowsById.keys()).forEach((id) => {
-        if (seenIds.has(id)) return;
-
-        busPanelRowsById.get(id).tr.remove();
-        busPanelRowsById.delete(id);
-        if (followedBusId === id) followedBusId = null;
-    });
-
-    items.forEach((item) => {
-        let row = busPanelRowsById.get(item.id);
-        if (!row) {
-            const tr = document.createElement('tr');
-            const statusTd = document.createElement('td');
-            const statusDot = document.createElement('span');
-            const labelTd = document.createElement('td');
-            const lngTd = document.createElement('td');
-            const latTd = document.createElement('td');
-
-            statusDot.className = 'bus-status-dot';
-            statusTd.appendChild(statusDot);
-            tr.append(statusTd, labelTd, lngTd, latTd);
-            tr.addEventListener('click', () => setFollowedBus(item.id));
-            busPanelBody.appendChild(tr);
-
-            row = { tr, statusDot, labelTd, lngTd, latTd };
-            busPanelRowsById.set(item.id, row);
+        if (t < 1) {
+            busHeadingAnimationId = requestAnimationFrame(step);
+        } else {
+            busHeadingAnimationId = null;
         }
+    }
 
-        row.labelTd.textContent = item.label;
-        row.lngTd.textContent = item.lng.toFixed(6);
-        row.latTd.textContent = item.lat.toFixed(6);
-        row.statusDot.style.background = item.isMoving ? '#4caf50' : '#f44336';
-        row.tr.classList.toggle('selected', item.id === followedBusId);
-    });
+    busHeadingAnimationId = requestAnimationFrame(step);
+}
+
+function updateBusHeadingTowards(fromLng, fromLat, toLng, toLat) {
+    const latMetersPerDeg = 111320;
+    const lngMetersPerDeg = 111320 * Math.cos(fromLat * Math.PI / 180);
+    const dx = (toLng - fromLng) * lngMetersPerDeg;
+    const dy = (toLat - fromLat) * latMetersPerDeg;
+
+    if (Math.abs(dx) < 1e-9 && Math.abs(dy) < 1e-9) return;
+
+    const targetHeading = Math.atan2(dx, dy);
+    rotateBusTowards(targetHeading, 1000);
 }
 
 // BusApiMixin을 명시적으로 섞은 컴포넌트만 (서울시) 버스 위치 API를 호출한다.
 // (믹스인을 적용하지 않으면 startBusPositionPolling 자체가 없어 호출이 전혀 일어나지 않는다)
-Object.assign(LiveBusFleet.prototype, BusApiMixin);
+// 화면의 버스 모델과는 별개로, 실제 버스 위치 데이터 자체를 계속 폴링해본다.
+Object.assign(BUS_G7.prototype, BusApiMixin);
+busLayer.startBusPositionPolling({
+    busRouteId: '113900012',
+    onUpdate: (positions) => {
+        console.log('버스 위치:', positions);
+    }
+});
 
-// 로컬 개발 서버/직접 배포한 서버에서는 프론트와 /api가 같은 origin이라 상대경로면
-// 충분하지만, GitHub Pages는 정적 파일만 서빙해서 /api 자체가 없다. 그래서 Pages에서
-// 열렸을 때만 별도로 띄워둔 백엔드(API_BASE_URL)를 절대경로로 호출하도록 분기한다.
-// (백엔드를 아직 배포하지 않았다면 빈 문자열로 두고, 배포 후 여기에 주소를 채운다)
-const REMOTE_API_BASE_URL = 'https://two026-gis-threejs-claude.onrender.com/';
-const API_BASE_URL = location.hostname.endsWith('github.io') ? REMOTE_API_BASE_URL : '';
+// 지도를 클릭하면 그 위치까지 항상 정해진 시간에 걸쳐 이동 (거리와 상관없이 소요 시간 고정)
+// 이동속도 10배 느리게(1/10) 조정: 3초 -> 30초
+const BUS_MOVE_DURATION_MS = 30000;
+const BUS_COLLISION_RADIUS_M = 15; // 편대 버스와 이 거리(m) 안으로 가까워지면 잠시 멈춘다
+let busMoveAnimationId = null;
+let isSingleBusMoving = false; // 버스 정보 패널의 상태 표시(녹색/빨간색)에 쓰인다
 
-// 지정한 노선ID로 폴링을 (다시) 시작한다. 노선을 바꿀 때 이전 노선의 버스가
-// 화면/패널에 남아있지 않도록 먼저 비운다.
-function startPollingForRoute(busRouteId) {
-    liveBusFleetLayer.setBuses([]);
-    busPanelRowsById.forEach((row) => row.tr.remove());
-    busPanelRowsById.clear();
-    followedBusId = null;
+// busFleetLayer 소속 버스 중 하나라도 modelOrigin과 이 거리 안에 있는지 확인한다.
+function isBusNearFleet() {
+    const latMetersPerDeg = 111320;
+    const lngMetersPerDeg = 111320 * Math.cos(modelOrigin[1] * Math.PI / 180);
 
-    liveBusFleetLayer.startBusPositionPolling({
-        busRouteId,
-        apiBaseUrl: API_BASE_URL,
-        intervalMs: 10000, // 10초마다 호출
-        onUpdate: (positions) => {
-            // plainNo(차량 번호판)를 키로 써서, 다음 호출에서도 같은 버스면 새로
-            // 만들지 않고 기존 버스의 위치만 갱신하도록 한다.
-            const items = positions.map((p) => ({
-                id: p.plainNo,
-                label: p.plainNo,
-                lng: p.lng,
-                lat: p.lat
-            }));
-            liveBusFleetLayer.setBuses(items);
-
-            // 이동 여부는 liveBusFleetLayer가 직전 좌표와 비교해 직접 계산하므로,
-            // 패널도 API의 stopFlag가 아니라 그 계산 결과를 그대로 가져다 쓴다
-            // (3D 라벨의 점 색과 패널의 점 색이 항상 같은 기준으로 일치하게 됨).
-            const panelItems = items.map((item) => ({
-                ...item,
-                isMoving: liveBusFleetLayer.busesById.get(item.id)?.isMoving ?? false
-            }));
-            renderBusPanel(panelItems);
-        }
+    return busFleetLayer.buses.some((bus) => {
+        const dx = (modelOrigin[0] - bus.position[0]) * lngMetersPerDeg;
+        const dy = (modelOrigin[1] - bus.position[1]) * latMetersPerDeg;
+        return Math.sqrt(dx * dx + dy * dy) < BUS_COLLISION_RADIUS_M;
     });
 }
 
-// 우측 상단 노선 선택 드롭다운: /json/bus_routeid.json(노선명/ROUTEID 목록)을
-// 읽어 옵션을 채우고, 고른 노선ID로 API 호출을 시작/전환한다.
-const busRouteSelect = document.getElementById('bus-route-select');
-
-// 절대경로('/json/...')는 GitHub Pages처럼 사이트가 도메인 루트가 아니라
-// 서브경로(레포명)에 떠 있을 때 그 경로를 무시하고 도메인 루트를 가리켜버려
-// 404가 난다. 상대경로로 두면 로컬 개발 서버/정적 호스팅 양쪽에서 다 맞는다.
-fetch('json/bus_routeid.json')
-    .then((response) => response.json())
-    .then((routes) => {
-        busRouteSelect.innerHTML = '';
-        routes.forEach((route) => {
-            const option = document.createElement('option');
-            option.value = route.ROUTEID;
-            option.textContent = route['노선명'];
-            busRouteSelect.appendChild(option);
-        });
-
-        busRouteSelect.addEventListener('change', () => {
-            startPollingForRoute(busRouteSelect.value);
-        });
-
-        // 처음엔 목록의 첫 노선으로 바로 조회를 시작한다.
-        if (routes.length > 0) {
-            busRouteSelect.value = routes[0].ROUTEID;
-            startPollingForRoute(String(routes[0].ROUTEID));
-        }
-    })
-    .catch((error) => {
-        console.error('버스 노선 목록 로드 실패:', error);
-    });
-
-// 선택된 버스가 있으면 카메라 중심을 계속 그 버스 위치로 고정해 따라가게 한다.
-// (center만 덮어써서 피치/베어링은 사용자가 계속 조작할 수 있다) 줌 전환
-// 애니메이션이 진행 중이면 같은 jumpTo 호출에 묶어서 함께 적용한다.
-function updateCameraFollow(now) {
-    if (followedBusId !== null) {
-        const bus = liveBusFleetLayer.busesById.get(followedBusId);
-        if (bus) {
-            if (zoomAnim) {
-                map.jumpTo({ center: [bus.lng, bus.lat], zoom: getAnimatedZoom(now) });
-            } else {
-                map.jumpTo({ center: [bus.lng, bus.lat] });
-            }
-        }
-    } else if (zoomAnim) {
-        map.jumpTo({ zoom: getAnimatedZoom(now) });
+function moveBusTo(targetLngLat, durationMs = BUS_MOVE_DURATION_MS, onArrive) {
+    if (busMoveAnimationId !== null) {
+        cancelAnimationFrame(busMoveAnimationId);
     }
 
-    requestAnimationFrame(updateCameraFollow);
+    const startLng = modelOrigin[0];
+    const startLat = modelOrigin[1];
+    const endLng = targetLngLat.lng;
+    const endLat = targetLngLat.lat;
+
+    updateBusHeadingTowards(startLng, startLat, endLng, endLat);
+
+    // 진행률(t)을 실제 경과 시간(elapsedMs)으로 직접 누적한다. 편대 버스와
+    // 충돌 반경 안에 있는 동안은 elapsedMs를 늘리지 않아서, t가 그 자리에서
+    // 멈춘 것처럼 보이다가(정지) 반경을 벗어나면 멈췄던 지점부터 그대로
+    // 이어서 진행한다(재출발).
+    let elapsedMs = 0;
+    let lastTime = performance.now();
+
+    function step(now) {
+        const dt = now - lastTime;
+        lastTime = now;
+
+        const nearFleet = isBusNearFleet();
+        isSingleBusMoving = !nearFleet;
+        if (!nearFleet) {
+            elapsedMs += dt;
+        }
+
+        const t = Math.min(1, elapsedMs / durationMs);
+        modelOrigin[0] = startLng + (endLng - startLng) * t;
+        modelOrigin[1] = startLat + (endLat - startLat) * t;
+        map.triggerRepaint();
+
+        if (t < 1) {
+            busMoveAnimationId = requestAnimationFrame(step);
+        } else {
+            busMoveAnimationId = null;
+            isSingleBusMoving = false;
+            if (onArrive) onArrive();
+        }
+    }
+
+    busMoveAnimationId = requestAnimationFrame(step);
 }
-requestAnimationFrame(updateCameraFollow);
+
+map.on('click', (e) => {
+    // moveBusTo(e.lngLat, BUS_MOVE_DURATION_MS);
+});
+
+// 버스가 아래 경로(shuttlePoints)를 순서대로 따라가다가 마지막 지점에
+// 도착하면 다시 첫 지점부터 반복한다.
+const shuttlePoints = [
+    { lng: 126.921468, lat: 37.555247 },
+    { lng: 126.920576, lat: 37.556000 },
+    { lng: 126.921441, lat: 37.556294 },
+    { lng: 126.921832, lat: 37.556899 },
+    { lng: 126.922311, lat: 37.556489 },
+    { lng: 126.923643, lat: 37.557476 },
+    { lng: 126.924342, lat: 37.558001 },
+    { lng: 126.924894, lat: 37.558680 },
+    { lng: 126.925168, lat: 37.558826 },
+    { lng: 126.925570, lat: 37.558336 }
+];
+let shuttleIndex = 0;
+
+// 경로 지점마다 순번이 적힌 아이콘(핀)을 지도 위에 표시한다.
+// maplibregl.Marker 대신 커스텀 레이어로 직접 투영해서, 카메라 회전/틸트 시
+// maplibregl.Marker의 지형 고도 재조회 버그로 인한 흔들림 없이 GPS 좌표에
+// 고정되어 보이게 한다.
+const routePointIconsLayer = new RoutePointIcons(map, shuttlePoints);
+map.on('load', () => {
+    map.addLayer(routePointIconsLayer);
+});
+
+// 정해진 시간(setTimeout)이 지나면 무조건 다음 지점으로 넘어가던 방식은,
+// 편대 버스와 충돌 반경 안에 들어와 moveBusTo가 잠시 멈춘 사이에도 타이머가
+// 그대로 흘러가 실제로 도착하기 전에 다음 지점으로 넘어가 버리는 문제가 있었다.
+// 그래서 moveBusTo의 onArrive 콜백으로 "실제로 그 좌표에 도착한 시점"에만
+// 바로 다음 지점으로 넘어가도록 바꿨다.
+function shuttleNext() {
+    moveBusTo(shuttlePoints[shuttleIndex], BUS_MOVE_DURATION_MS, () => {
+        // 마지막 지점 다음엔 다시 0번(첫 지점)으로 돌아간다.
+        shuttleIndex = (shuttleIndex + 1) % shuttlePoints.length;
+        shuttleNext();
+    });
+}
+shuttleNext();
+
+// 스페이스바를 누르고 있는 동안 카메라를 버스 위치에 고정 (떼면 고정 해제)
+let isCameraLockedToBus = false;
+let cameraLockAnimationId = null;
+
+function cameraLockStep() {
+    if (!isCameraLockedToBus) return;
+    map.jumpTo({ center: [modelOrigin[0], modelOrigin[1]] });
+    cameraLockAnimationId = requestAnimationFrame(cameraLockStep);
+}
+
+window.addEventListener('keydown', (e) => {
+    if (e.code !== 'Space' || e.repeat || isCameraLockedToBus) return;
+    e.preventDefault();
+    isCameraLockedToBus = true;
+    cameraLockAnimationId = requestAnimationFrame(cameraLockStep);
+});
+
+window.addEventListener('keyup', (e) => {
+    if (e.code !== 'Space') return;
+    isCameraLockedToBus = false;
+    if (cameraLockAnimationId !== null) {
+        cancelAnimationFrame(cameraLockAnimationId);
+        cameraLockAnimationId = null;
+    }
+});
 
 // 화면 좌측 상단에 마우스 좌표(경도/위도), 지도 회전각(bearing), 줌 레벨, FPS 표시
 const coordsEl = document.getElementById('coords');
@@ -311,3 +321,122 @@ function updateCompass() {
 }
 map.on('rotate', updateCompass);
 updateCompass();
+
+// ===== 오른쪽 버스 정보 패널 =====
+// 단일 버스 + 편대 버스 전체를 한 목록으로 모은다. position은 각 컴포넌트가
+// 매 프레임 갱신하는 배열을 그대로 참조하므로, 여기서 다시 조회할 필요 없이
+// 그 배열의 최신 값을 읽기만 하면 된다.
+function getTrackableBuses() {
+    const list = [{
+        label: 'BUS_G7',
+        position: modelOrigin,
+        // 편대 버스는 idleMs===0일 때 "이번 프레임에 실제로 움직였다"는 뜻이라
+        // 그대로 재사용하고, 단일 버스는 별도로 추적하는 플래그를 읽는다.
+        isMoving: () => isSingleBusMoving
+    }];
+    busFleetLayer.buses.forEach((bus, i) => {
+        list.push({
+            label: `BusModel-${i}`,
+            position: bus.position,
+            isMoving: () => bus.idleMs === 0
+        });
+    });
+    return list;
+}
+
+const trackableBuses = getTrackableBuses();
+const busPanelBody = document.getElementById('bus-panel-body');
+const busPanelRows = [];
+let followedBusIndex = null;
+
+// map.easeTo()는 애니메이션 도중 map.jumpTo()가 한 번이라도 호출되면 즉시
+// 끊겨버리는데, 팔로우 루프는 버스를 따라가려고 매 프레임 jumpTo(center)를
+// 불러야 해서 easeTo와 같이 쓸 수 없다. 그래서 줌 전환은 직접 rAF로 보간해서
+// 매 프레임 center와 함께 한 번의 jumpTo로 같이 적용한다.
+let zoomAnim = null; // { fromZoom, toZoom, startTime, durationMs }
+
+function startZoomAnim(toZoom, durationMs = 600) {
+    zoomAnim = { fromZoom: map.getZoom(), toZoom, startTime: performance.now(), durationMs };
+}
+
+function easeInOutQuad(t) {
+    return t < 0.5 ? 2 * t * t : 1 - ((-2 * t + 2) ** 2) / 2;
+}
+
+// 진행 중인 줌 애니메이션 값을 계산하고, 끝났으면 애니메이션 상태를 정리한다.
+function getAnimatedZoom(now) {
+    const t = Math.min(1, (now - zoomAnim.startTime) / zoomAnim.durationMs);
+    const zoom = zoomAnim.fromZoom + (zoomAnim.toZoom - zoomAnim.fromZoom) * easeInOutQuad(t);
+    if (t >= 1) zoomAnim = null;
+    return zoom;
+}
+
+function setFollowedBus(index) {
+    // 같은 행을 다시 클릭하면 추적을 해제한다.
+    followedBusIndex = followedBusIndex === index ? null : index;
+
+    busPanelRows.forEach((row, i) => {
+        row.tr.classList.toggle('selected', i === followedBusIndex);
+    });
+
+    startZoomAnim(followedBusIndex !== null ? 20 : 18);
+}
+
+// 행(DOM)은 한 번만 만들고, 매 프레임에는 텍스트만 갱신한다 (100여 개를 매번
+// 새로 그리면 훨씬 비싸다).
+trackableBuses.forEach((bus, i) => {
+    const tr = document.createElement('tr');
+    const statusTd = document.createElement('td');
+    const statusDot = document.createElement('span');
+    const labelTd = document.createElement('td');
+    const lngTd = document.createElement('td');
+    const latTd = document.createElement('td');
+
+    statusDot.className = 'bus-status-dot';
+    statusTd.appendChild(statusDot);
+    labelTd.textContent = bus.label;
+    tr.append(statusTd, labelTd, lngTd, latTd);
+    tr.addEventListener('click', () => setFollowedBus(i));
+    busPanelBody.appendChild(tr);
+
+    busPanelRows.push({ tr, statusDot, lngTd, latTd });
+});
+
+let busPanelLastUpdate = 0;
+
+function updateBusPanel(now) {
+    // 단일 버스는 편대와 달리 라벨을 자기 자신(bus_g7.js)이 매 프레임 그리지 않고
+    // app.js가 위치를 밀어주는 구조라, 이동 상태 점(dot)도 여기서 함께 갱신한다.
+    if (busLayer.label) {
+        busLayer.label.setMoving(isSingleBusMoving);
+    }
+
+    // 100여 개 행의 텍스트를 매 프레임 갱신하면 부담이 있어 초당 몇 번으로 제한.
+    if (now - busPanelLastUpdate >= 200) {
+        busPanelLastUpdate = now;
+        trackableBuses.forEach((bus, i) => {
+            const row = busPanelRows[i];
+            row.lngTd.textContent = bus.position[0].toFixed(6);
+            row.latTd.textContent = bus.position[1].toFixed(6);
+            row.statusDot.style.background = bus.isMoving() ? '#4caf50' : '#f44336';
+        });
+    }
+
+    // 선택된 버스가 있으면 카메라 중심을 계속 그 버스 위치로 고정해 따라가게 한다.
+    // (스페이스바 카메라 고정과 같은 방식: center만 덮어써서 피치/베어링은
+    // 사용자가 계속 조작할 수 있다) 줌 전환 애니메이션이 진행 중이면 같은
+    // jumpTo 호출에 묶어서 함께 적용한다.
+    if (followedBusIndex !== null) {
+        const target = trackableBuses[followedBusIndex];
+        if (zoomAnim) {
+            map.jumpTo({ center: [target.position[0], target.position[1]], zoom: getAnimatedZoom(now) });
+        } else {
+            map.jumpTo({ center: [target.position[0], target.position[1]] });
+        }
+    } else if (zoomAnim) {
+        map.jumpTo({ zoom: getAnimatedZoom(now) });
+    }
+
+    requestAnimationFrame(updateBusPanel);
+}
+requestAnimationFrame(updateBusPanel);
