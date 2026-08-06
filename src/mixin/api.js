@@ -6,7 +6,7 @@
 const BusApiMixin = {
     // 서버 프록시(/api/bus-position)를 주기적으로 호출해 버스 위치를 가져온다.
     // 옵션: busRouteId, startOrd, endOrd, intervalMs(기본 5000), onUpdate(positions => void)
-    startBusPositionPolling({ busRouteId, startOrd = '1', endOrd = '10', intervalMs = 5000, onUpdate }) {
+    startBusPositionPolling({ busRouteId, startOrd = '1', endOrd = '500', intervalMs = 5000, onUpdate }) {
         this.stopBusPositionPolling();
 
         const fetchOnce = async () => {
@@ -48,14 +48,17 @@ const BusApiMixin = {
             return [];
         }
 
+        // 실제 응답 필드명은 gpsX/gpsY가 아니라 tmX/tmY(WGS84 경도/위도)다.
+        // (posX/posY는 별도의 TM 좌표계라 lng/lat로 바로 쓸 수 없다)
         return Array.from(doc.querySelectorAll('itemList')).map((item) => {
             const get = (tag) => item.querySelector(tag)?.textContent ?? null;
             return {
                 plainNo: get('plainNo'),
                 vehId: get('vehId'),
-                gpsX: parseFloat(get('gpsX')),
-                gpsY: parseFloat(get('gpsY')),
-                sectOrd: get('sectOrd')
+                lng: parseFloat(get('tmX')),
+                lat: parseFloat(get('tmY')),
+                sectOrd: get('sectOrd'),
+                stopFlag: get('stopFlag')
             };
         });
     }

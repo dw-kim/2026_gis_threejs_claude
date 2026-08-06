@@ -94,13 +94,29 @@
             transform: translateY(-50%);
             width: 300px;
             height: 600px;
-            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
             background: rgba(0, 0, 0, 0.6);
             color: #fff;
             font-family: monospace;
             font-size: 11px;
             border-radius: 4px;
             z-index: 10;
+        }
+        #bus-route-select {
+            flex: 0 0 auto;
+            margin: 8px;
+            padding: 5px 6px;
+            background: #222;
+            color: #fff;
+            font-family: monospace;
+            font-size: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 4px;
+        }
+        #bus-panel-table-wrap {
+            flex: 1 1 auto;
+            overflow-y: auto;
         }
         #bus-panel table {
             width: 100%;
@@ -146,17 +162,22 @@
         <span class="dir dir-w">W</span>
     </div>
     <div id="bus-panel">
-        <table>
-            <thead>
-                <tr>
-                    <th></th>
-                    <th>버스</th>
-                    <th>Lng</th>
-                    <th>Lat</th>
-                </tr>
-            </thead>
-            <tbody id="bus-panel-body"></tbody>
-        </table>
+        <select id="bus-route-select">
+            <option value="">노선 선택 중...</option>
+        </select>
+        <div id="bus-panel-table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th></th>
+                        <th>버스</th>
+                        <th>Lng</th>
+                        <th>Lat</th>
+                    </tr>
+                </thead>
+                <tbody id="bus-panel-body"></tbody>
+            </table>
+        </div>
     </div>
 
     <script src="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
