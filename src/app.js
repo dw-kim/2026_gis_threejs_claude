@@ -143,6 +143,13 @@ function renderBusPanel(items) {
 // (믹스인을 적용하지 않으면 startBusPositionPolling 자체가 없어 호출이 전혀 일어나지 않는다)
 Object.assign(LiveBusFleet.prototype, BusApiMixin);
 
+// 로컬 개발 서버/직접 배포한 서버에서는 프론트와 /api가 같은 origin이라 상대경로면
+// 충분하지만, GitHub Pages는 정적 파일만 서빙해서 /api 자체가 없다. 그래서 Pages에서
+// 열렸을 때만 별도로 띄워둔 백엔드(API_BASE_URL)를 절대경로로 호출하도록 분기한다.
+// (백엔드를 아직 배포하지 않았다면 빈 문자열로 두고, 배포 후 여기에 주소를 채운다)
+const REMOTE_API_BASE_URL = 'https://2026-gis-threejs-claude.fly.dev/';
+const API_BASE_URL = location.hostname.endsWith('github.io') ? REMOTE_API_BASE_URL : '';
+
 // 지정한 노선ID로 폴링을 (다시) 시작한다. 노선을 바꿀 때 이전 노선의 버스가
 // 화면/패널에 남아있지 않도록 먼저 비운다.
 function startPollingForRoute(busRouteId) {
@@ -153,6 +160,7 @@ function startPollingForRoute(busRouteId) {
 
     liveBusFleetLayer.startBusPositionPolling({
         busRouteId,
+        apiBaseUrl: API_BASE_URL,
         intervalMs: 10000, // 10초마다 호출
         onUpdate: (positions) => {
             // plainNo(차량 번호판)를 키로 써서, 다음 호출에서도 같은 버스면 새로

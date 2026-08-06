@@ -30,7 +30,14 @@ app.get('/', (req, res) => {
 // public/에 있어서 둘 다 같은 루트 경로('/')로 서빙한다 (겹치는 파일명이 없어 순서는 상관없다).
 app.use(express.static(path.join(__dirname, 'src')));
 app.use(express.static(path.join(__dirname, 'public')));
-app.use('/api', apiRouter);
+
+// GitHub Pages(정적 호스팅)처럼 프론트엔드가 이 서버와 다른 origin에서 도는
+// 경우를 위해 /api만 CORS를 열어준다. 읽기 전용 공개 데이터 프록시라 쿠키/인증
+// 없이 GET만 쓰므로 Access-Control-Allow-Origin을 넓게 허용해도 위험이 없다.
+app.use('/api', (req, res, next) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    next();
+}, apiRouter);
 
 app.listen(PORT, () => {
     console.log(`Server running at http://localhost:${PORT}`);

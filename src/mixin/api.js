@@ -5,14 +5,16 @@
 // 이후 인스턴스에서 this.startBusPositionPolling({...}) / this.stopBusPositionPolling()로 사용.
 const BusApiMixin = {
     // 서버 프록시(/api/bus-position)를 주기적으로 호출해 버스 위치를 가져온다.
-    // 옵션: busRouteId, startOrd, endOrd, intervalMs(기본 5000), onUpdate(positions => void)
-    startBusPositionPolling({ busRouteId, startOrd = '1', endOrd = '500', intervalMs = 5000, onUpdate }) {
+    // 옵션: busRouteId, startOrd, endOrd, intervalMs(기본 5000), onUpdate(positions => void),
+    // apiBaseUrl(기본 '' — 같은 origin의 상대경로. GitHub Pages처럼 프론트와 API 서버가
+    // 다른 origin에 있을 때는 'https://내-백엔드-주소/' 처럼 절대 URL을 넘긴다)
+    startBusPositionPolling({ busRouteId, startOrd = '1', endOrd = '500', intervalMs = 5000, apiBaseUrl = '', onUpdate }) {
         this.stopBusPositionPolling();
 
         const fetchOnce = async () => {
             try {
                 const params = new URLSearchParams({ busRouteId, startOrd, endOrd });
-                const response = await fetch(`api/bus-position?${params}`);
+                const response = await fetch(`${apiBaseUrl}api/bus-position?${params}`);
                 const xmlText = await response.text();
                 const positions = BusApiMixin.parseBusPositions(xmlText);
                 onUpdate(positions);
