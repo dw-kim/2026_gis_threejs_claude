@@ -181,7 +181,10 @@ function startPollingForRoute(busRouteId) {
 // 읽어 옵션을 채우고, 고른 노선ID로 API 호출을 시작/전환한다.
 const busRouteSelect = document.getElementById('bus-route-select');
 
-fetch('/json/bus_routeid.json')
+// 절대경로('/json/...')는 GitHub Pages처럼 사이트가 도메인 루트가 아니라
+// 서브경로(레포명)에 떠 있을 때 그 경로를 무시하고 도메인 루트를 가리켜버려
+// 404가 난다. 상대경로로 두면 로컬 개발 서버/정적 호스팅 양쪽에서 다 맞는다.
+fetch('json/bus_routeid.json')
     .then((response) => response.json())
     .then((routes) => {
         busRouteSelect.innerHTML = '';

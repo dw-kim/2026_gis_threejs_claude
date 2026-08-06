@@ -8,7 +8,7 @@ import ModelLabel from './modelLabel.js';
 export default class CarModel extends BaseModel {
     constructor(map, {
         id = '3d-car-model',
-        modelUrl = '/modeling/carm/carm.gltf',
+        modelUrl = 'modeling/carm/carm.gltf',
         origin,
         rotate = [Math.PI / 2, 0, 0],
         elevationOffset = 0,

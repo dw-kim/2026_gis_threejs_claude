@@ -15,7 +15,7 @@ import ModelLabel from './modelLabel.js';
 export default class BusFleet extends BaseModel {
     constructor(map, {
         id = '3d-bus-fleet',
-        baseUrl = '/modeling/bus/',
+        baseUrl = 'modeling/bus/',
         objFile = 'G7 1350 6x4.obj',
         mtlFile = 'G7 1350 6x4.mtl',
         origin,

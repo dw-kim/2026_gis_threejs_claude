@@ -15,7 +15,11 @@ import ModelLabel from './modelLabel.js';
 export default class LiveBusFleet extends BaseModel {
     constructor(map, {
         id = '3d-live-bus-fleet',
-        baseUrl = '/modeling/bus/',
+        // 절대경로('/modeling/...')로 쓰면 GitHub Pages처럼 사이트가 도메인
+        // 루트가 아니라 서브경로(레포명)에 떠 있을 때 그 경로를 무시하고 도메인
+        // 루트를 가리켜버려 404가 난다. 상대경로로 두면 현재 페이지 위치 기준으로
+        // 풀려서 로컬 개발 서버/정적 호스팅(GitHub Pages) 양쪽에서 다 맞는다.
+        baseUrl = 'modeling/bus/',
         objFile = 'G7 1350 6x4.obj',
         mtlFile = 'G7 1350 6x4.mtl',
         rotateOffset = [Math.PI / 2, 0, 0],

@@ -7,7 +7,7 @@ import ModelLabel from './modelLabel.js';
 export default class RabbitModel extends BaseModel {
     constructor(map, {
         id = '3d-rabbit-model',
-        modelUrl = '/modeling/airport/korean_rabbit.gltf',
+        modelUrl = 'modeling/airport/korean_rabbit.gltf',
         origin,
         rotate = [Math.PI / 2, 0, 0],
         elevationOffset = 0,

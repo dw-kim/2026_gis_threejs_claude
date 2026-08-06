@@ -12,7 +12,7 @@ import ModelLabel from './modelLabel.js';
 export default class KoreanAirModel extends BaseModel {
     constructor(map, {
         id = '3d-korean-air-model',
-        modelUrl = '/modeling/airport/korean_air.gltf',
+        modelUrl = 'modeling/airport/korean_air.gltf',
         origin,
         count = 1, // 비행기 대수
         labelPrefix = 'KoreanAirModel',

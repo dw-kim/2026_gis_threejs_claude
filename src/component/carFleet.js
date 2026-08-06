@@ -15,7 +15,7 @@ import ModelLabel from './modelLabel.js';
 export default class CarFleet extends BaseModel {
     constructor(map, {
         id = '3d-car-fleet',
-        modelUrl = '/modeling/carm/carm.gltf',
+        modelUrl = 'modeling/carm/carm.gltf',
         origin,
         count = 10, // 자동차 대수
         labelPrefix = 'CarModel',

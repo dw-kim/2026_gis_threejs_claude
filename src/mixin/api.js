@@ -12,7 +12,7 @@ const BusApiMixin = {
         const fetchOnce = async () => {
             try {
                 const params = new URLSearchParams({ busRouteId, startOrd, endOrd });
-                const response = await fetch(`/api/bus-position?${params}`);
+                const response = await fetch(`api/bus-position?${params}`);
                 const xmlText = await response.text();
                 const positions = BusApiMixin.parseBusPositions(xmlText);
                 onUpdate(positions);
