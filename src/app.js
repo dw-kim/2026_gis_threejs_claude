@@ -147,7 +147,7 @@ Object.assign(LiveBusFleet.prototype, BusApiMixin);
 // 충분하지만, GitHub Pages는 정적 파일만 서빙해서 /api 자체가 없다. 그래서 Pages에서
 // 열렸을 때만 별도로 띄워둔 백엔드(API_BASE_URL)를 절대경로로 호출하도록 분기한다.
 // (백엔드를 아직 배포하지 않았다면 빈 문자열로 두고, 배포 후 여기에 주소를 채운다)
-const REMOTE_API_BASE_URL = 'https://2026-gis-threejs-claude.fly.dev/';
+const REMOTE_API_BASE_URL = ''; // 예: 'https://your-app.onrender.com/' — Render 배포 후 채운다
 const API_BASE_URL = location.hostname.endsWith('github.io') ? REMOTE_API_BASE_URL : '';
 
 // 지정한 노선ID로 폴링을 (다시) 시작한다. 노선을 바꿀 때 이전 노선의 버스가
