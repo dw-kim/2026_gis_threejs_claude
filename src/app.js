@@ -19,6 +19,13 @@ const map = new maplibregl.Map({
             'terrainSource': {
                 type: 'raster-dem',
                 url: 'https://tiles.mapterhorn.com/tilejson.json'
+            },
+            // 건물을 입체(fill-extrusion)로 세우려면 높이 속성이 담긴 벡터 타일이
+            // 필요하다. 래스터 타일(이미지)에는 그런 속성이 없어서 무료·키 불필요한
+            // OpenFreeMap의 OpenMapTiles 스키마 벡터 타일을 추가로 쓴다.
+            'openmaptiles': {
+                type: 'vector',
+                url: 'https://tiles.openfreemap.org/planet'
             }
         },
         layers: [
@@ -28,6 +35,26 @@ const map = new maplibregl.Map({
                 source: 'osm'
                 // 레이어 자체의 maxzoom은 "이 줌부터 레이어를 안 그림"을 뜻하므로
                 // 지정하지 않는다 (지정 시 그 줌 이상에서 지도가 하얗게 사라짐).
+            },
+            {
+                id: '3d-buildings',
+                type: 'fill-extrusion',
+                source: 'openmaptiles',
+                'source-layer': 'building',
+                minzoom: 14,
+                paint: {
+                    // 높이에 따라 밝기가 달라지는 색 램프 (낮은 건물은 밝게, 높은 건물은 진하게)
+                    'fill-extrusion-color': [
+                        'interpolate', ['linear'], ['coalesce', ['get', 'render_height'], 5],
+                        0, '#e9edf5',
+                        50, '#9db3d6',
+                        150, '#5c7cad',
+                        300, '#2c4870'
+                    ],
+                    'fill-extrusion-height': ['coalesce', ['get', 'render_height'], 5],
+                    'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], 0],
+                    'fill-extrusion-opacity': 0.85
+                }
             }
         ],
         terrain: {
